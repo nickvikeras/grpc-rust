@@ -52,6 +52,10 @@ pub struct Endpoint {
     pub(crate) http2_keep_alive_while_idle: Option<bool>,
     pub(crate) http2_header_table_size: Option<u32>,
     pub(crate) http2_max_header_list_size: Option<u32>,
+    pub(crate) http2_max_concurrent_reset_streams: Option<usize>,
+    pub(crate) http2_reset_stream_duration: Option<Duration>,
+    // `None` keeps hyper's default; `Some(None)` removes the limit.
+    pub(crate) http2_max_local_error_reset_streams: Option<Option<usize>>,
     pub(crate) connect_timeout: Option<Duration>,
     pub(crate) http2_adaptive_window: Option<bool>,
     pub(crate) local_address: Option<IpAddr>,
@@ -101,6 +105,9 @@ impl Endpoint {
             http2_keep_alive_while_idle: None,
             http2_header_table_size: None,
             http2_max_header_list_size: None,
+            http2_max_concurrent_reset_streams: None,
+            http2_reset_stream_duration: None,
+            http2_max_local_error_reset_streams: None,
             connect_timeout: None,
             http2_adaptive_window: None,
             executor: SharedExec::tokio(),
@@ -132,6 +139,9 @@ impl Endpoint {
             http2_keep_alive_while_idle: None,
             http2_header_table_size: None,
             http2_max_header_list_size: None,
+            http2_max_concurrent_reset_streams: None,
+            http2_reset_stream_duration: None,
+            http2_max_local_error_reset_streams: None,
             connect_timeout: None,
             http2_adaptive_window: None,
             executor: SharedExec::tokio(),
@@ -483,6 +493,55 @@ impl Endpoint {
     pub fn http2_max_header_list_size(self, size: u32) -> Self {
         Endpoint {
             http2_max_header_list_size: Some(size),
+            ..self
+        }
+    }
+
+    /// Sets the maximum number of locally reset HTTP/2 streams that are remembered at a time.
+    ///
+    /// When this client resets a stream, for example because a response future or body was
+    /// dropped, frames the server sent before it received the reset can still arrive. Frames for
+    /// a remembered stream are ignored. Only this many streams are remembered at a time, each for
+    /// [`http2_reset_stream_duration`](Self::http2_reset_stream_duration); a frame that arrives
+    /// for a stream that is not remembered is answered with another reset, which counts toward
+    /// [`http2_max_local_error_reset_streams`](Self::http2_max_local_error_reset_streams).
+    ///
+    /// Uses `hyper`'s default otherwise.
+    #[must_use]
+    pub fn http2_max_concurrent_reset_streams(self, max: usize) -> Self {
+        Endpoint {
+            http2_max_concurrent_reset_streams: Some(max),
+            ..self
+        }
+    }
+
+    /// Sets how long a locally reset HTTP/2 stream is remembered.
+    ///
+    /// See [`http2_max_concurrent_reset_streams`](Self::http2_max_concurrent_reset_streams).
+    ///
+    /// Uses `hyper`'s default otherwise.
+    #[must_use]
+    pub fn http2_reset_stream_duration(self, duration: Duration) -> Self {
+        Endpoint {
+            http2_reset_stream_duration: Some(duration),
+            ..self
+        }
+    }
+
+    /// Sets the maximum number of HTTP/2 streams this client resets because of protocol errors
+    /// by the server before it closes the connection.
+    ///
+    /// Once more streams than this have been reset this way, the client sends `GOAWAY` with
+    /// `ENHANCE_YOUR_CALM`, and every request still in flight on the connection fails. A frame
+    /// that arrives for a stream this client reset and no longer remembers counts as such an
+    /// error (see [`http2_max_concurrent_reset_streams`](Self::http2_max_concurrent_reset_streams)),
+    /// so a client that cancels many requests can reach this limit with a well-behaved server.
+    ///
+    /// Passing `None` removes the limit. Uses `hyper`'s default otherwise.
+    #[must_use]
+    pub fn http2_max_local_error_reset_streams(self, max: Option<usize>) -> Self {
+        Endpoint {
+            http2_max_local_error_reset_streams: Some(max),
             ..self
         }
     }
